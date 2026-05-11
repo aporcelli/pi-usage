@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://pi.dev/logo.svg" alt="Pi Logo" width="80" />
 </p>
-<h1 align="center">@porche/pi-usage</h1>
+<h1 align="center">pi-usage</h1>
 
 <p align="center">
   <b>A comprehensive usage and quota tracking extension for the Pi Coding Agent.</b>
@@ -9,7 +9,7 @@
 
 ## Overview
 
-`@porche/pi-usage` provides a Hermes-like `/usage` command for the [Pi Coding Agent](https://pi.dev). It gives you real-time visibility into your token consumption without spending LLM tokens. 
+`pi-usage` provides a Hermes-like `/usage` command for the [Pi Coding Agent](https://pi.dev). It gives you real-time visibility into your token consumption without spending LLM tokens. 
 
 It automatically detects your active model and displays:
 1. **Live Session Usage:** Input, output, and context window utilization for your current session.
@@ -18,16 +18,10 @@ It automatically detects your active model and displays:
 
 ## Installation
 
-You can install this package via npm:
+Install directly from GitHub:
 
 ```bash
-pi install npm:@porche/pi-usage
-```
-
-Or directly from GitHub:
-
-```bash
-pi install git:github.com/porche/pi-usage
+pi install git:github.com/aporcelli/pi-usage
 ```
 
 After installation, reload your Pi session:
@@ -45,7 +39,7 @@ The extension reads the live execution context in Pi. If you switch models using
 - **Anthropic (`anthropic`)**: Fetches your Claude Pro usage via the OAuth API.
 - **OpenRouter (`openrouter`)**: Fetches your remaining credits and API key spending limits.
 
-*Note: If the active provider does not expose a quota API (like Google Gemini), the extension degrades gracefully and falls back to showing your historical local consumption.*
+*Note: If the active provider does not expose a quota API (like Google Gemini), the extension degrades gracefully and falls back to showing your historical daily local consumption.*
 
 ### 3. Pi-Native Authentication
 No hardcoded paths or external dependencies. It reads directly from Pi's native credential store (`~/.pi/agent/auth.json`) and gracefully falls back to standard environment variables (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`).
@@ -61,23 +55,22 @@ Reset countdowns and timestamps are formatted beautifully. It resolves your time
 
 | Command | Description |
 |---|---|
-| `/usage` | Show session usage + account limits for the active provider. |
+| `/usage` | Show session token usage. Then show account limits for the active provider, or fallback to local daily usage if unsupported. |
 | `/usage limits <provider>` | Force query account limits for a specific provider (`openai-codex`, `anthropic`, `openrouter`). |
 | `/usage local` | Show daily historical token/cost consumption using `@ccusage/pi`. |
-| `/usage monthly` | Show monthly historical consumption. |
 
 ## UI & UX
 
 The output is crafted specifically for Terminal UIs (TUI), featuring:
 - **Visual Progress Bars:** `[██████████░░░░] 60%`
-- **Traffic Light Indicators:** 🟢 Healthy (>70%), 🟡 Watch (30-70%), 🔴 Critical (<30%)
+- **Traffic Light Indicators:** 🟢 (>70%), 🟡 (30-70%), 🔴 (<30%)
 - **Absolute Countdowns:** `(in 2h 15m)`
 
 ## Troubleshooting
 
 - **"No limits data" or "Unavailable"**: Ensure you have logged in via `/login` for OAuth providers, or that your API keys are correctly exported.
 - **Wrong Reset Timezone**: Export `PI_USAGE_TZ` in your shell (e.g., `export PI_USAGE_TZ=America/Argentina/Buenos_Aires`).
-- **"runUsage is not defined"**: Ensure you reloaded Pi (`/reload`) after updating the extension.
+- **"No pude consultar usage local"**: Ensure you have `@ccusage/pi` installed globally (`npm i -g @ccusage/pi`).
 
 ## License
 MIT
