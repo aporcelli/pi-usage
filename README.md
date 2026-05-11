@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="https://pi.dev/logo.svg" alt="Pi Logo" width="80" />
+  <img src="pi-usage-logo.svg" alt="Pi Usage" width="600" />
 </p>
-<h1 align="center">pi-usage</h1>
-
 <p align="center">
   <b>A comprehensive usage and quota tracking extension for the Pi Coding Agent.</b>
 </p>
