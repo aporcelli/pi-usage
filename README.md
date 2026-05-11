@@ -9,17 +9,24 @@
 
 ## Overview
 
-`pi-usage` provides a Hermes-like `/usage` command for the [Pi Coding Agent](https://pi.dev). It gives you real-time visibility into your token consumption without spending LLM tokens. 
+`pi-usage` brings a native, Hermes-style `/usage` command to the [Pi Coding Agent](https://pi.dev). 
+It provides complete visibility into your token consumption without spending LLM tokens to query it.
 
-It automatically detects your active model and displays:
-1. **Live Session Usage:** Input, output, and context window utilization for your current session.
-2. **Provider Account Limits:** Real-time remaining quota (e.g., 5-hour and weekly limits) for supported APIs.
-3. **Local History Fallback:** Historical daily usage tracking via `@ccusage/pi` for providers that do not expose public quota APIs.
+Every time you run `/usage`, it displays:
+1. **Live Session Token Usage:** The exact tokens (input, output, and context window percentage) spent in your current active session.
+2. **Provider Account Limits:** The real-time remaining quota from your active provider's API (e.g., ChatGPT Plus 5-hour limits, OpenRouter credits).
+3. **Graceful Fallback:** If your active provider (like Google Gemini) does not expose a public quota API, it automatically falls back to showing your historical daily local consumption via `@ccusage/pi`.
+
+## Prerequisites
+
+For the local usage fallback to work, you must install `@ccusage/pi` globally:
+```bash
+npm install -g @ccusage/pi
+```
 
 ## Installation
 
-Install directly from GitHub:
-
+Install directly from GitHub into your Pi environment:
 ```bash
 pi install git:github.com/aporcelli/pi-usage
 ```
@@ -29,48 +36,58 @@ After installation, reload your Pi session:
 /reload
 ```
 
-## Features
+## Commands Reference
 
-### 1. Smart Provider Detection
-The extension reads the live execution context in Pi. If you switch models using `/model`, `/usage` will dynamically adapt to query the correct limits for your new provider.
+### Default Command
+- **`/usage`**
+  Detects your current active model/provider. 
+  - Prints the **Session Token Usage**.
+  - Prints the **Account Limits** for the active provider.
+  - If the active provider doesn't support quota APIs, it prints a warning and displays your **Local Daily Usage** for today.
 
-### 2. Multi-Provider Quota Support
-- **OpenAI Codex (`openai-codex`)**: Fetches your ChatGPT Plus/Pro 5-hour and weekly window limits.
-- **Anthropic (`anthropic`)**: Fetches your Claude Pro usage via the OAuth API.
-- **OpenRouter (`openrouter`)**: Fetches your remaining credits and API key spending limits.
+### Explicit Provider Limits
+You can force the extension to check limits for a specific provider, regardless of what model you are currently using:
+- **`/usage limits openai-codex`**: Fetches ChatGPT Plus/Pro 5-hour and weekly window limits (requires Pi OAuth login).
+- **`/usage limits anthropic`**: Fetches Claude Pro usage via the OAuth API.
+- **`/usage limits openrouter`**: Fetches remaining credits and API key spending limits.
 
-*Note: If the active provider does not expose a quota API (like Google Gemini), the extension degrades gracefully and falls back to showing your historical daily local consumption.*
+### Explicit Local Usage
+- **`/usage local`**
+  Bypasses the provider API completely and shows your local daily historical token and cost consumption.
 
-### 3. Pi-Native Authentication
-No hardcoded paths or external dependencies. It reads directly from Pi's native credential store (`~/.pi/agent/auth.json`) and gracefully falls back to standard environment variables (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`).
+## How It Works Under the Hood
 
-### 4. Portable Timezone Formatting
-Reset countdowns and timestamps are formatted beautifully. It resolves your timezone seamlessly:
-1. `PI_USAGE_TZ` environment variable (highest priority)
+### 1. Smart Active Provider Inference
+Pi extensions run synchronously in the UI. To accurately determine what model you are using (even if you just ran `/model` or resumed a session with `--resume`), the extension uses a robust fallback chain:
+1. Direct API: `ctx.getModel()?.provider`
+2. Context model: `ctx.model?.provider`
+3. Session History: Scans the session branch backwards for the last `model_change` event.
+4. Global Settings: `defaultProvider` from `~/.pi/agent/settings.json`.
+
+### 2. Pi-Native Authentication
+The extension does not use hardcoded paths. It reads credentials natively from Pi:
+- Checks `~/.pi/agent/auth.json` first (for OAuth tokens generated via Pi's `/login` or saved API keys).
+- Falls back to standard environment variables (e.g., `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`).
+
+### 3. Portable Timezone Formatting
+Reset times (e.g., "Resets: 15:00 on 12 May") are automatically localized. You can force a specific timezone by setting an environment variable. Resolution order:
+1. `PI_USAGE_TZ` environment variable (e.g., `export PI_USAGE_TZ=America/Argentina/Buenos_Aires`)
 2. `TZ` environment variable
-3. System runtime timezone (`Intl`)
-4. UTC (fallback)
-
-## Commands
-
-| Command | Description |
-|---|---|
-| `/usage` | Show session token usage. Then show account limits for the active provider, or fallback to local daily usage if unsupported. |
-| `/usage limits <provider>` | Force query account limits for a specific provider (`openai-codex`, `anthropic`, `openrouter`). |
-| `/usage local` | Show daily historical token/cost consumption using `@ccusage/pi`. |
+3. System runtime timezone (`Intl.DateTimeFormat`)
+4. `UTC` (fallback)
 
 ## UI & UX
 
-The output is crafted specifically for Terminal UIs (TUI), featuring:
+The terminal output uses specialized formatting:
 - **Visual Progress Bars:** `[██████████░░░░] 60%`
-- **Traffic Light Indicators:** 🟢 (>70%), 🟡 (30-70%), 🔴 (<30%)
-- **Absolute Countdowns:** `(in 2h 15m)`
+- **Traffic Light Indicators:** 🟢 (>70% remaining), 🟡 (30-70% remaining), 🔴 (<30% remaining).
+- **Absolute Countdowns:** Clearly shows exactly when limits reset `(in 2h 15m)`.
 
 ## Troubleshooting
 
-- **"No limits data" or "Unavailable"**: Ensure you have logged in via `/login` for OAuth providers, or that your API keys are correctly exported.
-- **Wrong Reset Timezone**: Export `PI_USAGE_TZ` in your shell (e.g., `export PI_USAGE_TZ=America/Argentina/Buenos_Aires`).
-- **"No pude consultar usage local"**: Ensure you have `@ccusage/pi` installed globally (`npm i -g @ccusage/pi`).
+- **"No limits data" or "Unavailable"**: Ensure you have logged in via `/login` in Pi (for OAuth providers) or that your API keys are exported in your shell.
+- **Wrong Reset Timezone**: Export `PI_USAGE_TZ` in your shell profile.
+- **"No pude consultar usage local"**: You forgot to install `@ccusage/pi` globally. Run `npm i -g @ccusage/pi`.
 
 ## License
 MIT
