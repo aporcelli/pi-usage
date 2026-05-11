@@ -13,14 +13,7 @@ It provides complete visibility into your token consumption without spending LLM
 Every time you run `/usage`, it displays:
 1. **Live Session Token Usage:** The exact tokens (input, output, and context window percentage) spent in your current active session.
 2. **Provider Account Limits:** The real-time remaining quota from your active provider's API (e.g., ChatGPT Plus 5-hour limits, OpenRouter credits).
-3. **Graceful Fallback:** If your active provider (like Google Gemini) does not expose a public quota API, it automatically falls back to showing your historical daily local consumption via `@ccusage/pi`.
-
-## Prerequisites
-
-For the local usage fallback to work, you must install `@ccusage/pi` globally:
-```bash
-npm install -g @ccusage/pi
-```
+3. **Graceful Fallback:** If your active provider (like Google Gemini) does not expose a public quota API, it automatically falls back to local historical usage computed directly from your Pi session files.
 
 ## Installation
 
@@ -51,7 +44,7 @@ You can force the extension to check limits for a specific provider, regardless 
 
 ### Explicit Local Usage
 - **`/usage local`**
-  Bypasses the provider API completely and shows your local daily historical token and cost consumption.
+  Bypasses provider APIs completely and shows local historical usage (24h, 7d, 30d) computed from `~/.pi/agent/sessions`.
 
 ## How It Works Under the Hood
 
@@ -85,7 +78,7 @@ The terminal output uses specialized formatting:
 
 - **"No limits data" or "Unavailable"**: Ensure you have logged in via `/login` in Pi (for OAuth providers) or that your API keys are exported in your shell.
 - **Wrong Reset Timezone**: Export `PI_USAGE_TZ` in your shell profile.
-- **"No pude consultar usage local"**: You forgot to install `@ccusage/pi` globally. Run `npm i -g @ccusage/pi`.
+- **"local usage unavailable"**: Verify that `~/.pi/agent/sessions` exists and contains Pi session `.jsonl` files.
 
 ## License
 MIT

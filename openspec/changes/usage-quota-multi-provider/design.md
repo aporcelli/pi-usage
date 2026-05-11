@@ -42,8 +42,8 @@ type QuotaSnapshot = { provider: string; plan?: string; account?: string; window
 ```
 
 ### 5) Local usage backend
-- `src/local/ccusage.ts`
-- Runs `ccusage-pi`/`npx @ccusage/pi` and parses JSON into normalized local stats.
+- `src/local/sessions.ts`
+- Reads Pi session JSONL files and computes normalized local stats windows.
 
 ## Config strategy
 - Read Pi settings from `~/.pi/agent/settings.json` only for provider hint.

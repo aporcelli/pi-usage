@@ -8,7 +8,7 @@ Pi package that provides `/usage` command with provider quota view and local usa
 ### FR-1 Command surface
 - `/usage` defaults to `limits` mode.
 - `/usage limits [openai-codex|anthropic|openrouter]` shows account quota if available.
-- `/usage local [daily|weekly|monthly]` shows local historical usage from `@ccusage/pi`.
+- `/usage local` shows local historical usage from Pi session files.
 
 ### FR-2 Provider adapters
 - Adapter interface must be provider-agnostic.

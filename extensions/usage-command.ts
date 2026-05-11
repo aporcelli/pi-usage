@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -17,6 +17,7 @@ const ANSI_RESET = "\u001b[0m";
 const CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const PI_AUTH_PATH = join(homedir(), ".pi", "agent", "auth.json");
 const PI_SETTINGS_PATH = join(homedir(), ".pi", "agent", "settings.json");
+const PI_SESSIONS_PATH = join(homedir(), ".pi", "agent", "sessions");
 
 function asWhite(text: string): string {
   return `${ANSI_WHITE}${text}${ANSI_RESET}`;
@@ -61,6 +62,10 @@ function fmtCountdown(seconds?: number): string {
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   return `${h}h ${m}m`;
+}
+
+function fmtUSD(n: number): string {
+  return `$${Number(n || 0).toFixed(2)}`;
 }
 
 function fmtReset(raw?: string | number): string {
@@ -254,78 +259,138 @@ function fetchProviderLimits(provider: Provider): { ok: boolean; output?: string
   return fetchOpenRouterLimits();
 }
 
-function getWeeklySinceDate(): string {
-  const d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+type UsageTotals = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+  cost: number;
+  calls: number;
+};
+
+function zeroUsage(): UsageTotals {
+  return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, cost: 0, calls: 0 };
 }
 
-function runLocalUsage(period: "daily" | "weekly" | "monthly"): { ok: boolean; output: string; error?: string } {
-  const runners = [
-    ["ccusage-pi"],
-    ["ccusage"],
-    ["npx", "@ccusage/pi@latest"],
-  ] as const;
+function addUsage(target: UsageTotals, raw: any) {
+  const input = Number(raw?.input || 0);
+  const output = Number(raw?.output || 0);
+  const cacheRead = Number(raw?.cacheRead || 0);
+  const cacheWrite = Number(raw?.cacheWrite || 0);
+  const total = Number(raw?.totalTokens || input + output + cacheRead + cacheWrite);
+  const cost = Number(raw?.cost?.total || 0);
 
-  const args = period === "monthly" ? ["monthly", "--json", "--breakdown"] : period === "weekly" ? ["daily", "--json", "--breakdown", "--since", getWeeklySinceDate()] : ["daily", "--json", "--breakdown"];
-  const errs: string[] = [];
-
-  for (const [cmd, firstArg] of runners) {
-    const fullArgs = firstArg ? [firstArg, ...args] : args;
-    const r = spawnSync(cmd, fullArgs, { encoding: "utf8", timeout: 30000 });
-    if (r.status === 0) return { ok: true, output: (r.stdout || "").trim() || "No usage output." };
-    errs.push(`${cmd} ${fullArgs.join(" ")} => ${r.stderr?.trim() || `exit ${r.status}`}`);
-  }
-
-  return { ok: false, output: "", error: errs.join("\n") };
+  target.input += input;
+  target.output += output;
+  target.cacheRead += cacheRead;
+  target.cacheWrite += cacheWrite;
+  target.total += total;
+  target.cost += cost;
+  target.calls += 1;
 }
 
-function renderLocalPretty(period: string, raw: string): string | null {
-  let data: any;
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    return null;
+function collectJsonlFiles(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (p: string) => {
+    let entries: any[];
+    try {
+      entries = readdirSync(p, { withFileTypes: true }) as any[];
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const name = String(e.name || "");
+      const full = join(p, name);
+      if (e.isDirectory?.()) walk(full);
+      else if (e.isFile?.() && name.endsWith(".jsonl")) out.push(full);
+    }
+  };
+  walk(dir);
+  return out;
+}
+
+function tsToMs(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const ms = Date.parse(v);
+    if (!Number.isNaN(ms)) return ms;
+  }
+  return null;
+}
+
+function formatWindow(label: string, u: UsageTotals): string {
+  const cache = u.cacheRead + u.cacheWrite;
+  return `${label.padEnd(5)}  calls ${String(u.calls).padStart(5)}  tokens ${u.total.toLocaleString("en-US").padStart(12)}  in ${u.input.toLocaleString("en-US").padStart(11)}  out ${u.output.toLocaleString("en-US").padStart(11)}  cache ${cache.toLocaleString("en-US").padStart(11)}  cost ${fmtUSD(u.cost)}`;
+}
+
+function renderLocalUsageFromSessions(): { ok: boolean; output: string; error?: string } {
+  const files = collectJsonlFiles(PI_SESSIONS_PATH);
+  if (!files.length) {
+    return { ok: false, output: "", error: `No Pi sessions found in ${PI_SESSIONS_PATH}` };
   }
 
-  const rows = (period === "monthly" ? data.monthly : data.daily) || [];
-  const t = data.totals || {};
-  const inTok = Number(t.inputTokens || 0);
-  const outTok = Number(t.outputTokens || 0);
-  const cacheTok = Number(t.cacheReadTokens || 0) + Number(t.cacheCreationTokens || 0);
-  const totalTok = inTok + outTok + cacheTok;
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const weekMs = 7 * dayMs;
+  const monthMs = 30 * dayMs;
 
-  const lines: string[] = [];
-  lines.push(`📊 Local usage (${period})`);
-  lines.push("");
-  lines.push(`Cost total:      $${Number(t.totalCost || 0).toFixed(2)}`);
-  lines.push(`Tokens total:    ${totalTok.toLocaleString("en-US")}`);
-  lines.push(`Input tokens:    ${inTok.toLocaleString("en-US")}`);
-  lines.push(`Output tokens:   ${outTok.toLocaleString("en-US")}`);
-  lines.push(`Cache tokens:    ${cacheTok.toLocaleString("en-US")}`);
+  const day = zeroUsage();
+  const week = zeroUsage();
+  const month = zeroUsage();
 
-  if (rows.length) {
-    lines.push("");
-    lines.push(period === "monthly" ? "By month:" : "By day:");
-    const maxCost = Math.max(...rows.map((r: any) => Number(r.totalCost || 0)), 0.000001);
-    for (const r of rows.slice(0, 12)) {
-      const label = r.date || r.month || "(unknown)";
-      const c = Number(r.totalCost || 0);
-      const p = (c / maxCost) * 100;
-      lines.push(`- ${label}  $${c.toFixed(2)}  ${bar(p, 14)}`);
+  for (const file of files) {
+    let raw = "";
+    try {
+      raw = readFileSync(file, "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      let evt: any;
+      try {
+        evt = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      if (evt?.type !== "message") continue;
+      if (evt?.message?.role !== "assistant") continue;
+      const usage = evt?.message?.usage || evt?.usage;
+      if (!usage) continue;
+
+      const ts = tsToMs(evt?.timestamp) ?? tsToMs(evt?.message?.timestamp);
+      if (!ts) continue;
+      const age = now - ts;
+      if (age < 0 || age > monthMs) continue;
+
+      if (age <= monthMs) addUsage(month, usage);
+      if (age <= weekMs) addUsage(week, usage);
+      if (age <= dayMs) addUsage(day, usage);
     }
   }
 
-  return lines.join("\n");
+  const lines = [
+    "📊 Local usage (Pi sessions)",
+    "",
+    formatWindow("24h", day),
+    formatWindow("7d", week),
+    formatWindow("30d", month),
+  ];
+
+  if (month.calls === 0) {
+    lines.push("", "No assistant usage records found in the last 30 days.");
+  }
+
+  return { ok: true, output: lines.join("\n") };
 }
 
 export default function usageCommand(pi: ExtensionAPI) {
   pi.registerCommand("usage", {
     description: "Show account quota limits by provider or local usage stats",
     getArgumentCompletions: (prefix) => {
-      const vals = ["limits", "openai-codex", "anthropic", "openrouter", "local", "daily", "weekly", "monthly"];
+      const vals = ["limits", "openai-codex", "anthropic", "openrouter", "local"];
       return vals.filter((v) => v.startsWith(prefix)).map((v) => ({ value: v, label: v }));
     },
     handler: async (args, ctx) => {
@@ -371,14 +436,10 @@ export default function usageCommand(pi: ExtensionAPI) {
         }
 
         if (!provider || !["openai-codex", "anthropic", "openrouter"].includes(provider)) {
-          ctx.ui.notify(asWhite(`⚠️ ${provider || "unknown"} no tiene API de cuotas en este plugin. Fallback a histórico local:\n`), "warning");
-          const local = runLocalUsage("daily");
-          if (local.ok) {
-            const pretty = renderLocalPretty("daily", local.output);
-            ctx.ui.notify(asWhite((pretty || local.output).slice(0, 8000)), "info");
-          } else {
-            ctx.ui.notify(asWhite(`No pude consultar usage local.\n${local.error || ""}`), "error");
-          }
+          ctx.ui.notify(asWhite(`⚠️ ${provider || "unknown"} has no quota API in this plugin. Falling back to local usage.\n`), "warning");
+          const local = renderLocalUsageFromSessions();
+          if (local.ok) ctx.ui.notify(asWhite(local.output.slice(0, 8000)), "info");
+          else ctx.ui.notify(asWhite(`Local usage unavailable.\n${local.error || ""}`), "error");
           return;
         }
 
@@ -391,18 +452,17 @@ export default function usageCommand(pi: ExtensionAPI) {
         return;
       }
 
-      const period = (first === "local" ? "daily" : first) as "daily" | "monthly";
-      if (!["daily", "monthly", "local"].includes(period)) {
-        ctx.ui.notify("Usage: /usage [limits [openai-codex|anthropic|openrouter]|local|monthly]", "warning");
+      if (first !== "local") {
+        ctx.ui.notify("Usage: /usage [limits [openai-codex|anthropic|openrouter]|local]", "warning");
         return;
       }
 
-      const res = runLocalUsage(period);
-      if (!res.ok) {
-        ctx.ui.notify(asWhite(`⚠️ local usage unavailable\n${res.error || "unknown error"}`), "warning");
+      const local = renderLocalUsageFromSessions();
+      if (!local.ok) {
+        ctx.ui.notify(asWhite(`⚠️ local usage unavailable\n${local.error || "unknown error"}`), "warning");
         return;
       }
-      ctx.ui.notify(asWhite(renderLocalPretty(period, res.output) || res.output), "info");
+      ctx.ui.notify(asWhite(local.output), "info");
     },
   });
 }

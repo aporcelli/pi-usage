@@ -32,7 +32,7 @@ Chain strategy: stacked-to-main
 - [ ] Add adapter tests (happy path + auth-missing + schema-missing).
 
 ### PR3 — local mode + docs + hardening
-- [ ] Implement `local` mode parser from `@ccusage/pi`.
+- [x] Implement local mode parser from Pi session files.
 - [ ] Add robust error messaging and provider setup hints.
 - [ ] Final README: install, config, compatibility matrix, troubleshooting.
 - [ ] Add smoke test checklist for Linux/macOS/WSL.

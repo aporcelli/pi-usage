@@ -7,7 +7,7 @@ Pi no ofrece un comando nativo equivalente a `/usage` de Hermes/Codex para ver c
 Crear un paquete Pi (`pi-package`) con extensión que registre `/usage` y un motor de adapters por provider:
 
 - `usage limits [provider]` → cuota real (si disponible)
-- `usage local [daily|weekly|monthly]` → consumo histórico local con `@ccusage/pi`
+- `usage local` → consumo histórico local calculado desde sesiones de Pi
 - default `/usage` → `limits` usando provider activo o fallback configurable
 
 ## Provider adapters (v1)
