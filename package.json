@@ -1,6 +1,6 @@
 {
   "name": "@porche/pi-usage",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Pi Coding Agent extension for tracking session token usage, provider account limits, and historical local consumption.",
   "license": "MIT",
   "type": "module",
