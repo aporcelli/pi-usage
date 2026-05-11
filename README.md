@@ -27,24 +27,17 @@ After installation, reload your Pi session:
 /reload
 ```
 
-## Commands Reference
+## Commands
 
-### Default Command
 - **`/usage`**
-  Detects your current active model/provider. 
-  - Prints the **Session Token Usage**.
-  - Prints the **Account Limits** for the active provider.
-  - If the active provider doesn't support quota APIs, it prints a warning and displays your **Local Daily Usage** for today.
+  Detects your active provider and displays current session token usage, plus provider-specific API limits (or a local usage summary if the provider is unsupported).
 
-### Explicit Provider Limits
-You can force the extension to check limits for a specific provider, regardless of what model you are currently using:
-- **`/usage limits openai-codex`**: Fetches ChatGPT Plus/Pro 5-hour and weekly window limits (requires Pi OAuth login).
-- **`/usage limits anthropic`**: Fetches Claude Pro usage via the OAuth API.
-- **`/usage limits openrouter`**: Fetches remaining credits and API key spending limits.
+- **`/usage limits <provider>`**
+  Forcefully checks API limits for a specific provider.
+  - Supported providers: `openai-codex`, `anthropic`, `openrouter`.
 
-### Explicit Local Usage
 - **`/usage local`**
-  Bypasses provider APIs completely and shows local historical usage (24h, 7d, 30d) computed from `~/.pi/agent/sessions`.
+  Bypasses provider APIs completely and calculates historical token usage (24h, 7d, 30d) directly from your Pi session files.
 
 ## How It Works Under the Hood
 
