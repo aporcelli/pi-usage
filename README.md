@@ -30,11 +30,14 @@ After installation, reload your Pi session:
 ## Commands
 
 - **/usage**
-  Detects your active provider and displays current session token usage, plus provider-specific API limits (or a local usage summary if the provider is unsupported).
+  Detects your active provider and displays session token usage and API limits for that provider.
 
 - **/usage <provider>**
-  Forcefully checks API limits for a specific provider.
-  - Supported providers: `openai-codex`, `anthropic`, `openrouter`.
+  Checks account limits for a specific provider.
+  Supported providers: `openai-codex`, `anthropic`, `openrouter`.
+
+- **/usage limits**
+  Checks account limits for the active provider.
 
 - **/usage local**
   Bypasses provider APIs completely and calculates historical token usage (24h, 7d, 30d) directly from your Pi session files.
