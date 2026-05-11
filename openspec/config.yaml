@@ -1,0 +1,23 @@
+project:
+  name: pi-usage
+  description: Pi extension/package for provider quota usage display (Codex/Anthropic/OpenRouter) with TUI-friendly output
+  repository_type: pi-package
+sdd:
+  mode: interactive
+  strict_tdd: false
+  test_command: "npm test"
+  review_line_budget: 400
+quality:
+  require_verification: true
+  require_docs: true
+compatibility:
+  targets:
+    - linux
+    - macos
+    - wsl
+  timezone_strategy:
+    priority:
+      - PI_USAGE_TZ
+      - TZ
+      - Intl.detected
+      - UTC
