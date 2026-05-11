@@ -15,6 +15,8 @@ type PiAuth = Record<string, PiAuthEntry>;
 const ANSI_WHITE = "\u001b[97m";
 const ANSI_RESET = "\u001b[0m";
 const CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
+const COPILOT_VERSION = "0.35.0";
+const COPILOT_EDITOR_VERSION = "vscode/1.107.0";
 const PI_AUTH_PATH = join(homedir(), ".pi", "agent", "auth.json");
 const PI_SETTINGS_PATH = join(homedir(), ".pi", "agent", "settings.json");
 const PI_SESSIONS_PATH = join(homedir(), ".pi", "agent", "sessions");
@@ -113,6 +115,29 @@ function runCurlJson(url: string, headers: string[], timeoutMs = 15000): { ok: b
   } catch (e) {
     return { ok: false, error: `invalid json: ${String(e)}` };
   }
+}
+
+function ghCliToken(): string | null {
+  const r = spawnSync("gh", ["auth", "token"], {
+    encoding: "utf8",
+    timeout: 5000,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (r.status !== 0) return null;
+  const t = String(r.stdout || "").trim();
+  return t || null;
+}
+
+function copilotHeaders(authHeader: string): string[] {
+  return [
+    `Authorization: ${authHeader}`,
+    "Accept: application/json",
+    `User-Agent: GitHubCopilotChat/${COPILOT_VERSION}`,
+    `Editor-Version: ${COPILOT_EDITOR_VERSION}`,
+    `Editor-Plugin-Version: copilot-chat/${COPILOT_VERSION}`,
+    "Copilot-Integration-Id: vscode-chat",
+    "Content-Type: application/json",
+  ];
 }
 
 function refreshCodexToken(refreshToken: string): string | null {
@@ -218,6 +243,106 @@ function fetchAnthropicLimits(): { ok: boolean; output?: string; error?: string 
   return { ok: true, output: lines.join("\n") };
 }
 
+function parseGitHubCopilotWindows(data: any): Array<{ label: string; used: number; limit: number; resetAt?: string | number; next?: string }> {
+  const out: Array<{ label: string; used: number; limit: number; resetAt?: string | number; next?: string }> = [];
+
+  const resetAt = data?.quota_reset_date ?? data?.quota_reset_date_utc ?? data?.limited_user_reset_date;
+  const snapshots = data?.quota_snapshots;
+  if (snapshots && typeof snapshots === "object") {
+    const map: Array<[string, string]> = [
+      ["premium_interactions", "Premium / month"],
+      ["chat", "Chat / month"],
+      ["completions", "Completions / month"],
+    ];
+    for (const [key, label] of map) {
+      const snap = snapshots[key];
+      if (!snap || snap.unlimited) continue;
+      const limit = Number(snap.entitlement ?? 0);
+      const remaining = Number(snap.remaining ?? snap.quota_remaining ?? 0);
+      if (limit <= 0) continue;
+      const used = Math.max(0, limit - remaining);
+      const overage = Number(snap.overage_count ?? 0);
+      const overagePermitted = !!snap.overage_permitted;
+      out.push({
+        label,
+        used,
+        limit,
+        resetAt,
+        next: overage > 0 ? `+${overage} overage` : overagePermitted ? "overage allowed" : undefined,
+      });
+    }
+    return out;
+  }
+
+  if (data?.monthly_quotas && data?.limited_user_quotas) {
+    for (const [key, label] of [["chat", "Chat / month"], ["completions", "Completions / month"]] as const) {
+      const limit = Number(data.monthly_quotas[key] ?? 0);
+      const remaining = Number(data.limited_user_quotas[key] ?? 0);
+      if (limit <= 0) continue;
+      out.push({ label, used: Math.max(0, limit - remaining), limit, resetAt });
+    }
+  }
+
+  return out;
+}
+
+function fetchGitHubCopilotLimits(): { ok: boolean; output?: string; error?: string } {
+  const e = readPiAuth("github-copilot") as PiAuthEntry | null;
+  const stored = e?.type === "oauth" ? String(e.access || "").trim() : "";
+  const tokens = [stored, String(process.env.GITHUB_TOKEN || "").trim(), String(process.env.GH_TOKEN || "").trim()].filter(Boolean);
+  const cli = ghCliToken();
+  if (cli && !tokens.includes(cli)) tokens.push(cli);
+  if (!tokens.length) return { ok: false, error: "No GitHub Copilot token found. Login in Pi or run 'gh auth login'." };
+
+  const tryUsage = (authHeader: string) =>
+    runCurlJson("https://api.github.com/copilot_internal/user", copilotHeaders(authHeader));
+
+  let usageResp: { ok: boolean; json?: any; error?: string } | null = null;
+
+  for (const t of tokens) {
+    // 1) Try exchange endpoint
+    const exchange = runCurlJson("https://api.github.com/copilot_internal/v2/token", copilotHeaders(`Bearer ${t}`));
+    if (exchange.ok && exchange.json?.token) {
+      const usage = tryUsage(`Bearer ${exchange.json.token}`);
+      if (usage.ok && usage.json) {
+        usageResp = usage;
+        break;
+      }
+    }
+
+    // 2) Try direct forms
+    for (const auth of [`token ${t}`, `Bearer ${t}`]) {
+      const usage = tryUsage(auth);
+      if (usage.ok && usage.json) {
+        usageResp = usage;
+        break;
+      }
+    }
+    if (usageResp) break;
+  }
+
+  if (!usageResp?.ok || !usageResp.json) {
+    return { ok: false, error: usageResp?.error || "GitHub Copilot usage unavailable" };
+  }
+
+  const windows = parseGitHubCopilotWindows(usageResp.json);
+  if (!windows.length) return { ok: false, error: "No Copilot quota windows in response." };
+
+  const lines: string[] = ["📈 Account limits (GitHub Copilot)"];
+  for (const w of windows) {
+    const usedPct = w.limit > 0 ? (w.used / w.limit) * 100 : 0;
+    const left = Math.max(0, 100 - usedPct);
+    const t = usageTone(left);
+    lines.push("");
+    lines.push(`${t.icon} ${w.label}: ${bar(left, 24, t.fill)}  left ${left.toFixed(0)}%`);
+    lines.push(`   Usage:     ${w.used.toLocaleString("en-US")} / ${w.limit.toLocaleString("en-US")}`);
+    if (w.resetAt) lines.push(`   Resets:    ${fmtReset(w.resetAt)}`);
+    if (w.next) lines.push(`   Note:      ${w.next}`);
+  }
+
+  return { ok: true, output: lines.join("\n") };
+}
+
 function fetchOpenRouterLimits(): { ok: boolean; output?: string; error?: string } {
   const e = readPiAuth("openrouter") as PiAuthEntry | null;
   const key = e?.type === "api_key" ? String(e.key || "").trim() : String(process.env.OPENROUTER_API_KEY || "").trim();
@@ -256,6 +381,7 @@ function fetchOpenRouterLimits(): { ok: boolean; output?: string; error?: string
 function fetchProviderLimits(provider: Provider): { ok: boolean; output?: string; error?: string } {
   if (provider === "openai-codex") return fetchCodexLimits();
   if (provider === "anthropic") return fetchAnthropicLimits();
+  if (provider === "github-copilot") return fetchGitHubCopilotLimits();
   return fetchOpenRouterLimits();
 }
 
@@ -390,7 +516,7 @@ export default function usageCommand(pi: ExtensionAPI) {
   pi.registerCommand("usage", {
     description: "Show account quota limits by provider or local usage stats",
     getArgumentCompletions: (prefix) => {
-      const vals = ["limits", "openai-codex", "anthropic", "openrouter", "local"];
+      const vals = ["limits", "openai-codex", "anthropic", "github-copilot", "openrouter", "local"];
       return vals.filter((v) => v.startsWith(prefix)).map((v) => ({ value: v, label: v }));
     },
     handler: async (args, ctx) => {
@@ -403,7 +529,7 @@ export default function usageCommand(pi: ExtensionAPI) {
         (ctx as any).sessionManager?.getBranch?.()?.slice().reverse().find((e: any) => e.type === "model_change")?.provider ||
         defaultProviderFromPiSettings();
 
-      if (first === "limits" || first === "openai-codex" || first === "anthropic" || first === "openrouter") {
+      if (first === "limits" || first === "openai-codex" || first === "anthropic" || first === "github-copilot" || first === "openrouter") {
         if (first === "limits" && parts[1]) {
           ctx.ui.notify(asWhite("Use /usage <provider> for explicit provider checks. '/usage limits' only uses the active provider."), "warning");
           return;
@@ -440,7 +566,7 @@ export default function usageCommand(pi: ExtensionAPI) {
           }
         }
 
-        if (!provider || !["openai-codex", "anthropic", "openrouter"].includes(provider)) {
+        if (!provider || !["openai-codex", "anthropic", "github-copilot", "openrouter"].includes(provider)) {
           ctx.ui.notify(asWhite(`⚠️ ${provider || "unknown"} has no quota API in this plugin. Falling back to local usage.\n`), "warning");
           const local = renderLocalUsageFromSessions();
           if (local.ok) ctx.ui.notify(asWhite(local.output.slice(0, 8000)), "info");
@@ -448,7 +574,7 @@ export default function usageCommand(pi: ExtensionAPI) {
           return;
         }
 
-        const res = fetchProviderLimits(provider as "openai-codex" | "anthropic" | "openrouter");
+        const res = fetchProviderLimits(provider as "openai-codex" | "anthropic" | "github-copilot" | "openrouter");
         if (!res.ok) {
           ctx.ui.notify(asWhite(`⚠️ ${provider} limits unavailable\n${res.error || "unknown error"}`), "warning");
           return;
@@ -458,7 +584,7 @@ export default function usageCommand(pi: ExtensionAPI) {
       }
 
       if (first !== "local") {
-        ctx.ui.notify("Usage: /usage | /usage limits | /usage <openai-codex|anthropic|openrouter> | /usage local", "warning");
+        ctx.ui.notify("Usage: /usage | /usage limits | /usage <openai-codex|anthropic|github-copilot|openrouter> | /usage local", "warning");
         return;
       }
 

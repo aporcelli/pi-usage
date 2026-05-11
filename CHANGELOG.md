@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.4] - 2026-05-11
 
+### Added
+- Added `github-copilot` quota support to `/usage`.
+- Implemented GitHub Copilot fetch flow with resilient fallback chain:
+  - token exchange via `https://api.github.com/copilot_internal/v2/token`
+  - direct usage fetch via `https://api.github.com/copilot_internal/user`
+  - `gh auth token` fallback when stored Pi auth token is unavailable/stale
+
 ### Fixed
 - Aligned command behavior with docs: `/usage limits` now only checks the active provider.
 - Added explicit validation/warning when users try `/usage limits <provider>`.

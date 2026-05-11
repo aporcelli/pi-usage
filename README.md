@@ -12,7 +12,7 @@ It provides complete visibility into your token consumption without spending LLM
 
 Every time you run `/usage`, it displays:
 1. **Live Session Token Usage:** The exact tokens (input, output, and context window percentage) spent in your current active session.
-2. **Provider Account Limits:** The real-time remaining quota from your active provider's API (e.g., ChatGPT Plus 5-hour limits, OpenRouter credits).
+2. **Provider Account Limits:** The real-time remaining quota from your active provider's API (e.g., ChatGPT Plus 5-hour limits, GitHub Copilot monthly quotas, OpenRouter credits).
 3. **Graceful Fallback:** If your active provider (like Google Gemini) does not expose a public quota API, it automatically falls back to local historical usage computed directly from your Pi session files.
 
 ## Installation
@@ -37,7 +37,7 @@ After installation, reload your Pi session:
 
 - **/usage <provider>**
   Checks account limits for a specific provider.
-  Supported providers: `openai-codex`, `anthropic`, `openrouter`.
+  Supported providers: `openai-codex`, `anthropic`, `github-copilot`, `openrouter`.
 
 - **/usage local**
   Bypasses provider APIs completely and calculates historical token usage (24h, 7d, 30d) directly from your Pi session files.
@@ -54,7 +54,8 @@ Pi extensions run synchronously in the UI. To accurately determine what model yo
 ### 2. Pi-Native Authentication
 The extension does not use hardcoded paths. It reads credentials natively from Pi:
 - Checks `~/.pi/agent/auth.json` first (for OAuth tokens generated via Pi's `/login` or saved API keys).
-- Falls back to standard environment variables (e.g., `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`).
+- Falls back to standard environment variables (e.g., `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GITHUB_TOKEN`/`GH_TOKEN`).
+- For GitHub Copilot, it also falls back to `gh auth token` automatically when available.
 
 ### 3. Portable Timezone Formatting
 Reset times (e.g., "Resets: 15:00 on 12 May") are automatically localized. You can force a specific timezone by setting an environment variable. Resolution order:
@@ -73,6 +74,7 @@ The terminal output uses specialized formatting:
 ## Troubleshooting
 
 - **"No limits data" or "Unavailable"**: Ensure you have logged in via `/login` in Pi (for OAuth providers) or that your API keys are exported in your shell.
+- **GitHub Copilot unavailable**: run `gh auth login` (or export `GITHUB_TOKEN`) so `/usage github-copilot` can resolve a valid token fallback.
 - **Wrong Reset Timezone**: Export `PI_USAGE_TZ` in your shell profile.
 - **"local usage unavailable"**: Verify that `~/.pi/agent/sessions` exists and contains Pi session `.jsonl` files.
 
