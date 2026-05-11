@@ -243,47 +243,90 @@ function fetchAnthropicLimits(): { ok: boolean; output?: string; error?: string 
   return { ok: true, output: lines.join("\n") };
 }
 
-function parseGitHubCopilotWindows(data: any): Array<{ label: string; used: number; limit: number; resetAt?: string | number; next?: string }> {
-  const out: Array<{ label: string; used: number; limit: number; resetAt?: string | number; next?: string }> = [];
+type CopilotWindow = {
+  label: string;
+  used: number;
+  limit: number;
+  resetAt?: string | number;
+  next?: string;
+  unlimited?: boolean;
+};
 
-  const resetAt = data?.quota_reset_date ?? data?.quota_reset_date_utc ?? data?.limited_user_reset_date;
-  const snapshots = data?.quota_snapshots;
-  if (snapshots && typeof snapshots === "object") {
-    const map: Array<[string, string]> = [
-      ["premium_interactions", "Premium / month"],
-      ["chat", "Chat / month"],
-      ["completions", "Completions / month"],
-    ];
-    for (const [key, label] of map) {
-      const snap = snapshots[key];
-      if (!snap || snap.unlimited) continue;
-      const limit = Number(snap.entitlement ?? 0);
-      const remaining = Number(snap.remaining ?? snap.quota_remaining ?? 0);
-      if (limit <= 0) continue;
-      const used = Math.max(0, limit - remaining);
-      const overage = Number(snap.overage_count ?? 0);
-      const overagePermitted = !!snap.overage_permitted;
-      out.push({
-        label,
-        used,
-        limit,
-        resetAt,
-        next: overage > 0 ? `+${overage} overage` : overagePermitted ? "overage allowed" : undefined,
-      });
+function parseGitHubCopilotWindows(data: any): CopilotWindow[] {
+  const roots = [data, data?.data, data?.payload, data?.user].filter(Boolean);
+
+  const asNum = (...vals: any[]) => {
+    for (const v of vals) {
+      const n = Number(v);
+      if (Number.isFinite(n)) return n;
     }
-    return out;
+    return 0;
+  };
+
+  for (const root of roots) {
+    const out: CopilotWindow[] = [];
+    const resetAt = root?.quota_reset_date ?? root?.quota_reset_date_utc ?? root?.limited_user_reset_date;
+
+    const snapshots = root?.quota_snapshots;
+    if (snapshots && typeof snapshots === "object") {
+      const map: Array<[string, string]> = [
+        ["premium_interactions", "Premium / month"],
+        ["chat", "Chat / month"],
+        ["completions", "Completions / month"],
+      ];
+
+      for (const [key, label] of map) {
+        const snap = snapshots[key];
+        if (!snap) continue;
+
+        const unlimited = !!(snap.unlimited || snap.is_unlimited);
+        if (unlimited) {
+          out.push({ label, used: 0, limit: 0, resetAt, unlimited: true, next: "unlimited" });
+          continue;
+        }
+
+        const limit = asNum(snap.entitlement, snap.limit, snap.quota, snap.total);
+        const remaining = asNum(snap.remaining, snap.quota_remaining, snap.left, snap.available);
+        const used = limit > 0 ? Math.max(0, limit - remaining) : asNum(snap.used, snap.consumed);
+        if (limit <= 0 && used <= 0) continue;
+
+        const overage = asNum(snap.overage_count);
+        const overagePermitted = !!snap.overage_permitted;
+        out.push({
+          label,
+          used,
+          limit,
+          resetAt,
+          next: overage > 0 ? `+${overage} overage` : overagePermitted ? "overage allowed" : undefined,
+        });
+      }
+
+      if (out.length) return out;
+    }
+
+    if (root?.monthly_quotas && root?.limited_user_quotas) {
+      for (const [key, label] of [["chat", "Chat / month"], ["completions", "Completions / month"]] as const) {
+        const limit = asNum(root.monthly_quotas[key]);
+        const remaining = asNum(root.limited_user_quotas[key]);
+        if (limit <= 0) continue;
+        out.push({ label, used: Math.max(0, limit - remaining), limit, resetAt });
+      }
+      if (out.length) return out;
+    }
+
+    if (Array.isArray(root?.quota_windows)) {
+      for (const w of root.quota_windows) {
+        const label = String(w?.name || w?.label || "Quota");
+        const limit = asNum(w?.limit, w?.entitlement, w?.max);
+        const used = asNum(w?.used, w?.consumed, limit - asNum(w?.remaining));
+        if (limit <= 0 && used <= 0) continue;
+        out.push({ label, used: Math.max(0, used), limit, resetAt: w?.resets_at ?? w?.reset_at });
+      }
+      if (out.length) return out;
+    }
   }
 
-  if (data?.monthly_quotas && data?.limited_user_quotas) {
-    for (const [key, label] of [["chat", "Chat / month"], ["completions", "Completions / month"]] as const) {
-      const limit = Number(data.monthly_quotas[key] ?? 0);
-      const remaining = Number(data.limited_user_quotas[key] ?? 0);
-      if (limit <= 0) continue;
-      out.push({ label, used: Math.max(0, limit - remaining), limit, resetAt });
-    }
-  }
-
-  return out;
+  return [];
 }
 
 function fetchGitHubCopilotLimits(): { ok: boolean; output?: string; error?: string } {
@@ -326,14 +369,26 @@ function fetchGitHubCopilotLimits(): { ok: boolean; output?: string; error?: str
   }
 
   const windows = parseGitHubCopilotWindows(usageResp.json);
-  if (!windows.length) return { ok: false, error: "No Copilot quota windows in response." };
+  if (!windows.length) {
+    const root = usageResp.json?.data ?? usageResp.json;
+    const keys = Object.keys(root || {}).slice(0, 12).join(", ");
+    return { ok: false, error: `No Copilot quota windows in response. Keys: ${keys || "none"}` };
+  }
 
   const lines: string[] = ["📈 Account limits (GitHub Copilot)"];
   for (const w of windows) {
-    const usedPct = w.limit > 0 ? (w.used / w.limit) * 100 : 0;
+    lines.push("");
+
+    if (w.unlimited || w.limit <= 0) {
+      lines.push(`🟢 ${w.label}: unlimited`);
+      if (w.next) lines.push(`   Note:      ${w.next}`);
+      if (w.resetAt) lines.push(`   Resets:    ${fmtReset(w.resetAt)}`);
+      continue;
+    }
+
+    const usedPct = (w.used / w.limit) * 100;
     const left = Math.max(0, 100 - usedPct);
     const t = usageTone(left);
-    lines.push("");
     lines.push(`${t.icon} ${w.label}: ${bar(left, 24, t.fill)}  left ${left.toFixed(0)}%`);
     lines.push(`   Usage:     ${w.used.toLocaleString("en-US")} / ${w.limit.toLocaleString("en-US")}`);
     if (w.resetAt) lines.push(`   Resets:    ${fmtReset(w.resetAt)}`);
