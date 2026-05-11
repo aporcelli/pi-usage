@@ -404,7 +404,12 @@ export default function usageCommand(pi: ExtensionAPI) {
         defaultProviderFromPiSettings();
 
       if (first === "limits" || first === "openai-codex" || first === "anthropic" || first === "openrouter") {
-        const provider = (first === "limits" ? parts[1] : first) || activeProvider;
+        if (first === "limits" && parts[1]) {
+          ctx.ui.notify(asWhite("Use /usage <provider> for explicit provider checks. '/usage limits' only uses the active provider."), "warning");
+          return;
+        }
+
+        const provider = first === "limits" ? activeProvider : first;
         
         // Always show session token usage first (like Hermes) if > 0
         const usage = typeof (ctx as any).getContextUsage === "function" ? (ctx as any).getContextUsage() : undefined;
@@ -453,7 +458,7 @@ export default function usageCommand(pi: ExtensionAPI) {
       }
 
       if (first !== "local") {
-        ctx.ui.notify("Usage: /usage [limits [openai-codex|anthropic|openrouter]|local]", "warning");
+        ctx.ui.notify("Usage: /usage | /usage limits | /usage <openai-codex|anthropic|openrouter> | /usage local", "warning");
         return;
       }
 
